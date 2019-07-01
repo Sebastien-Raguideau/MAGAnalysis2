@@ -1,0 +1,201 @@
+import os 
+import glob
+from Bio.SeqIO.FastaIO import SimpleFastaParser as SFP
+from os.path import abspath, realpath, dirname,basename
+
+# set up various path variables
+MAGANALYSIS=dirname(abspath(realpath(workflow.snakefile)))
+SCRIPTS=MAGANALYSIS+"/scripts"
+SCG_DATA=MAGANALYSIS+"/scg_data"
+CONTIGS=config['CONTIGS']
+BIN_COMPOSITION=config["BIN_COMPOSITION"]
+BIN_FOLDER=config["BIN_FOLDER"]
+# cog database
+COG_DB="/home/sebr/seb/Database/rpsblast_cog_db/Cog"
+
+# get the list of SCG used for analysis
+LIST_SCG=[line.rstrip() for line in open(SCG_DATA+"/scg_cogs_min0.97_max1.03_unique_genera.txt")]
+
+# set up directory for bin_info
+os.system("mkdir -p bin_analysis" ) 
+# set up path for BIN_COMPOSITION and extract the list of bins
+if BIN_COMPOSITION :
+    LIST_BIN=[line.rstrip().split(',')[1] for index,line in open(BIN_COMPOSITION)]
+    os.system("ln -s "+BIN_COMPOSITION+" bin_analysis/contig_to_cluster.csv")
+elif BIN_FOLDER :
+    LIST_BIN=glob.glob(BIN_FOLDER+'/*')
+    os.system("mkdir -p bin_analysis" ) 
+    BIN_COMPOSITION="bin_analysis"
+else :
+    print("Something went wrong, BIN_COMPOSITION="+BIN_COMPOSITION+" and BIN_FOLDER="+BIN_FOLDER+". At least one of those should neither be an empty string or 'False'")
+
+
+# ---------------------------------------------------------------------------------------------------
+rule all : 
+    input:"Tree/FastTree/AlignAllR.tree"
+# rule all : 
+#     input:expand("bins/{bin}/{bin}_SCG.fna",bin=[basename(path_bin).split('.fa')[0] for path_bin in LIST_BIN])
+
+
+
+# ----------------------------------------------------------------------------------------------------
+# ---------------------       Post processing      ---------------------------------------------------
+# ----------------------------------------------------------------------------------------------------
+
+# If starting from concoct we need to extract sequences of each bins
+
+
+
+# If starting from metabat we need to produce a table of contig assignment
+rule clustering_metabat :
+    input: List=LIST_BIN
+    output:"bin_analysis/contig_to_cluster.csv"
+    run:
+        List_bins=input["List"]
+        Handle=open(output[0],"w")
+        Handle.write("contig_id,0\n")
+        for file in List_bins :
+            bin_name=basename(file).split('.fa')[0]
+            for name,seq in SFP(open(file)) :
+                Handle.write(",".join([bin_name+"_"+name.split(' ')[0],bin_name])+"\n")
+        Handle.close()
+
+# ---------------------------------------------------------------------------------------------------
+# ---------------------      Identify which bins are MAgs      --------------------------------------
+# ---------------------------------------------------------------------------------------------------
+
+# -------- Run prodigal to get orfs and gff -------------------- 
+
+rule prodigal:
+    input: BIN_FOLDER+"/{Bin}.fa"
+    output: faa="{path}/{Bin}/{Bin}.faa",
+            fna="{path}/{Bin}/{Bin}.fna",
+            gff="{path}/{Bin}/{Bin}.gff"
+    log:    "{path}/{Bin}/{Bin}.log"
+    shell:
+        "prodigal -i {input} -a {output.faa} -d {output.fna} -f gff -o {output.gff} -p meta &>> {log}"
+
+#------- rpsblast on each bin, custom output --------------------
+rule COG_annotation:
+    input : "{path}.faa"
+    output: "{path}.cogs.tsv"
+    log:    "{path}.log"
+    params:  db=COG_DB
+    shell:   """
+             rpsblast+ -outfmt '6 qseqid sseqid evalue pident length slen qlen' -evalue 0.00001 -query {input} -db {params.db} -out {output} &>>{log}
+             """
+
+#------- select best hit and use criterion : min 5% coverage, min 1e-10 evalue--
+rule parse_cogs_annotation:
+    input:   "{path}.cogs.tsv"
+    output:  cog="{path}_best_hits.cogs.tsv"
+    shell:   """
+             {SCRIPTS}/Filter_Cogs.py {input} --cdd_cog_file {SCG_DATA}/cdd_to_cog.tsv  > {output.cog}
+             """
+
+# ------- extract scg --------------------------------------------
+rule extract_SCG_sequences:
+    input:  annotation="{filename}_best_hits.cogs.tsv",
+            gff="{filename}.gff",
+            fna="{filename}.fna"
+    output: "{filename,bins*}_SCG.fna"
+    shell:  "{SCRIPTS}/Extract_SCG.py {input.fna} {input.annotation} {SCG_DATA}/scg_cogs_min0.97_max1.03_unique_genera.txt {input.gff}>{output}"
+
+# ------- concatenate all SCG in a unique file ---------------------
+rule Global_SCG:
+    input : List=expand("bins/{bin}/{bin}_SCG.fna",bin=[basename(path_bin).split('.fa')[0] for path_bin in LIST_BIN])
+    output: "bin_analysis/All_SCGs.fna"
+    run : 
+        List_files=input["List"]
+        handle=open(output[0],"w")
+        for file in List_files :
+            Bin=basename(file).split("_SCG.fna")[0]
+            for header,seq in SFP(open(file)) :
+                new_header=Bin+"_"+header
+                handle.write(">"+new_header+"\n"+seq+"\n")
+        handle.close()
+
+# ------- build a table of SCG by bins-----------------------------
+rule SCG_table:
+    input  : bins="bin_analysis/contig_to_cluster.csv",
+             SCG="bin_analysis/All_SCGs.fna"
+    output : table="bin_analysis/SCG_table.csv",
+             List="bin_analysis/Mag_List.csv"
+    shell  : "{SCRIPTS}/SCG_in_Bins.py {input.bins} {input.SCG} -t {output.table} -l {output.List}"
+
+# ------- Create a Mag directory      -----------------------------
+checkpoint Select_Mag:
+    input  : "bin_analysis/Mag_List.csv",
+    output : directory('MAGs')
+    shell  : """
+    for mag in $(cat {input})
+    do
+        mag=${{mag%,}}
+        ln -sf ../bins/$mag MAGs/
+    done
+    """ 
+
+# ---------------------------------------------------------------------------------------------------
+# -----------------------------------      Build A Tree      ----------------------------------------
+# ---------------------------------------------------------------------------------------------------
+
+
+# ----- Create one fna file by SCG ------
+def get_mag_list(wildcard):
+    _=checkpoints.Select_Mag.get()
+    return "bin_analysis/Mag_List.csv"
+
+rule aggregate_SCG:
+    input:  get_mag_list
+    output: expand("Tree/scg/{SCG}.fna",SCG=LIST_SCG)
+    shell: """
+     {SCRIPTS}/ExtractSCGs.py MAGs/ {SCG_DATA}/scg_cogs_min0.97_max1.03_unique_genera.txt Tree/scg/
+      """
+
+# ------- if needed extract refference cogs -------------------
+rule extract_ref_SCGs:
+    input:SCG_DATA+"/All_COGs.tar.gz"
+    output: expand(SCG_DATA+"/All_{SCG}.ffn",SCG=LIST_SCG)
+    shell:"tar -xf {input} -C {SCG_DATA}/ "
+
+# ------- Start allignment -------------------
+rule run_mafft:
+    input: scg="Tree/scg/{SCG}.fna",
+           database_scg=SCG_DATA+"/All_{SCG}.ffn"
+    output: all_scg="Tree/mafft/{SCG}_all.ffn",
+            alignement="Tree/mafft/{SCG}_all.gffn"
+    log: "log/mafft_{SCG}.log"
+    threads:1000
+    shell: """
+    cat {input.scg} {input.database_scg} > {output.all_scg}
+    mafft --thread {threads} {output.all_scg} > {output.alignement} 2>{log}
+    """
+# ------- Trim allignment -------------------
+rule trimal :
+    input: "Tree/mafft/{SCG}_all.gffn"
+    output: "Tree/trimal/{SCG}_al.gfa"
+    shell: "trimal -in {input} -out {output} -gt 0.9 -cons 60"
+
+# ------- Fastree pre processing -------------
+rule generate_data_for_fastree:
+    input: trimed=expand("Tree/trimal/{SCG}_al.gfa",SCG=LIST_SCG),
+           alignement=expand("Tree/mafft/{SCG}_all.gffn",SCG=LIST_SCG)
+    output: gfa="Tree/FastTree/AlignAllR.gfa",
+            names=temp("Tree/FastTree/Names.txt"),
+            renamed=temp("Tree/FastTree/renamed_alignment.tmp")
+    shell:"""
+    cat {input.alignement} | grep ">" | sed 's/_COG.*//' | sort | uniq | sed 's/>//g' > {output.names}
+    {SCRIPTS}/CombineGenes.pl {output.names} {input.trimed} > {output.renamed}
+    {SCRIPTS}/MapTI.pl {SCG_DATA}/TaxaSpeciesR.txt < $(cat ) > {output.gfa}
+    """
+# ----------- Launch Fastree ------------------
+rule Launch_FastTree:
+    input: "{path}/AlignAllR.gfa"
+    output: "{path}/AlignAllR.tree"
+    log: "{path}/FastTreeMP.out"
+    shell:"""
+    FastTreeMP -nt -gtr < {input} 2> {log} > {output}
+    """
+
+
+
