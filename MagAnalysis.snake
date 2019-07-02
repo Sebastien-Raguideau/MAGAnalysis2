@@ -162,7 +162,7 @@ rule extract_ref_SCGs:
 rule run_mafft:
     input: scg="Tree/scg/{SCG}.fna",
            database_scg=SCG_DATA+"/All_{SCG}.ffn"
-    output: all_scg="Tree/mafft/{SCG}_all.ffn",
+    output: all_scg="Tree/scg/{SCG}_all.ffn",
             alignement="Tree/mafft/{SCG}_all.gffn"
     log: "log/mafft_{SCG}.log"
     threads:1000
@@ -185,8 +185,8 @@ rule generate_data_for_fastree:
             renamed=temp("Tree/FastTree/renamed_alignment.tmp")
     shell:"""
     cat {input.alignement} | grep ">" | sed 's/_COG.*//' | sort | uniq | sed 's/>//g' > {output.names}
-    {SCRIPTS}/CombineGenes.pl {output.names} {input.trimed} > {output.renamed}
-    {SCRIPTS}/MapTI.pl {SCG_DATA}/TaxaSpeciesR.txt < $(cat ) > {output.gfa}
+    {SCRIPTS}/CombineGenes.pl {output.names} {input.trimed} > temp
+    {SCRIPTS}/MapTI.pl {SCG_DATA}/TaxaSpeciesR.txt < temp > {output.gfa}
     """
 # ----------- Launch Fastree ------------------
 rule Launch_FastTree:
@@ -196,6 +196,3 @@ rule Launch_FastTree:
     shell:"""
     FastTreeMP -nt -gtr < {input} 2> {log} > {output}
     """
-
-
-
