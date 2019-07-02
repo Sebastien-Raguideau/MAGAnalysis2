@@ -185,8 +185,8 @@ rule generate_data_for_fastree:
             renamed=temp("Tree/FastTree/renamed_alignment.tmp")
     shell:"""
     cat {input.alignement} | grep ">" | sed 's/_COG.*//' | sort | uniq | sed 's/>//g' > {output.names}
-    {SCRIPTS}/CombineGenes.pl {output.names} {input.trimed} > temp
-    {SCRIPTS}/MapTI.pl {SCG_DATA}/TaxaSpeciesR.txt < temp > {output.gfa}
+    {SCRIPTS}/CombineGenes.pl {output.names} {input.trimed} > {output.renamed}
+    {SCRIPTS}/MapTI.pl {SCG_DATA}/TaxaSpeciesR.txt < {output.renamed} > {output.gfa}
     """
 # ----------- Launch Fastree ------------------
 rule Launch_FastTree:
