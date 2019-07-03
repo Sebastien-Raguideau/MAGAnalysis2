@@ -47,7 +47,7 @@ def main(argv):
                 else:
                     corecog_bin[cogId][bin_name] = [header,seq]
 
-    path_output=args.output_folder+"/SCGs/"
+    path_output=args.output_folder
     if not os.path.isdir(path_output) :
         os.system("mkdir -p "+path_output)
 
