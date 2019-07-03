@@ -25,10 +25,10 @@ def main(argv):
     with open(args.cogs_list, 'r') as f:
         core_cogs = set([x.rstrip() for x in f.readlines()])
 
-
+    print(args)
     corecog_bin = defaultdict(dict)
     bins = set()
-    for filename in glob.iglob(args.root_dir + "/*/SCG.fna"):
+    for filename in glob.iglob(args.root_dir + "/*/*SCG.fna"):
 
 
         bin_name = filename.split("/")[-2]
