@@ -32,7 +32,7 @@ else :
 
 # ---------------------------------------------------------------------------------------------------
 rule all : 
-    input:"Tree/FastTree/AlignAllR.tree"
+    input:"Tree/FastTree/AlignAllR_assign.tsv"
 # rule all : 
 #     input:expand("bins/{bin}/{bin}_SCG.fna",bin=[basename(path_bin).split('.fa')[0] for path_bin in LIST_BIN])
 
@@ -98,7 +98,7 @@ rule extract_SCG_sequences:
     input:  annotation="{filename}_best_hits.cogs.tsv",
             gff="{filename}.gff",
             fna="{filename}.fna"
-    output: "{filename,bins*}_SCG.fna"
+    output: "{filename}_SCG.fna"
     shell:  "{SCRIPTS}/Extract_SCG.py {input.fna} {input.annotation} {SCG_DATA}/scg_cogs_min0.97_max1.03_unique_genera.txt {input.gff}>{output}"
 
 # ------- concatenate all SCG in a unique file ---------------------
@@ -126,8 +126,9 @@ rule SCG_table:
 # ------- Create a Mag directory      -----------------------------
 checkpoint Select_Mag:
     input  : "bin_analysis/Mag_List.csv",
-    output : directory('MAGs')
+    output : directory('MAGs/')
     shell  : """
+    mkdir -p {output}
     for mag in $(cat {input})
     do
         mag=${{mag%,}}
@@ -164,7 +165,7 @@ rule run_mafft:
            database_scg=SCG_DATA+"/All_{SCG}.ffn"
     output: all_scg="Tree/scg/{SCG}_all.ffn",
             alignement="Tree/mafft/{SCG}_all.gffn"
-    log: "log/mafft_{SCG}.log"
+    log: "Tree/mafft/mafft_{SCG}.log"
     threads:1000
     shell: """
     cat {input.scg} {input.database_scg} > {output.all_scg}
@@ -185,7 +186,7 @@ rule generate_data_for_fastree:
             renamed=temp("Tree/FastTree/renamed_alignment.tmp")
     shell:"""
     cat {input.alignement} | grep ">" | sed 's/_COG.*//' | sort | uniq | sed 's/>//g' > {output.names}
-    {SCRIPTS}/CombineGenes.pl {output.names} {input.trimed} > {output.renamed}
+    {SCRIPTS}/CombineGenes.pl {output.names} {input.trimed} > {output.renamed} 2>/dev/null
     {SCRIPTS}/MapTI.pl {SCG_DATA}/TaxaSpeciesR.txt < {output.renamed} > {output.gfa}
     """
 # ----------- Launch Fastree ------------------
@@ -196,3 +197,12 @@ rule Launch_FastTree:
     shell:"""
     FastTreeMP -nt -gtr < {input} 2> {log} > {output}
     """
+
+# --------- Assign mag to lca with ref  ---------
+rule  Assign_tree:
+    input: "{path}/AlignAllR.tree"
+    output: "{path}/AlignAllR_assign.tsv"
+    shell :"""
+    python {SCRIPTS}/AssignTree.py {input} {SCG_DATA}/TaxaSpeciesR.txt {SCG_DATA}/all_taxa_lineage.tsv > {output}
+    """
+
