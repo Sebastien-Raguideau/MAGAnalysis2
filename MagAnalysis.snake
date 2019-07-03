@@ -23,7 +23,7 @@ if BIN_COMPOSITION :
     LIST_BIN=[line.rstrip().split(',')[1] for index,line in open(BIN_COMPOSITION)]
     os.system("ln -s "+BIN_COMPOSITION+" bin_analysis/contig_to_cluster.csv")
 elif BIN_FOLDER :
-    LIST_BIN=glob.glob(BIN_FOLDER+'/*')
+    LIST_BIN=glob.glob(BIN_FOLDER+'/*.fa')
     os.system("mkdir -p bin_analysis" ) 
     BIN_COMPOSITION="bin_analysis"
 else :
